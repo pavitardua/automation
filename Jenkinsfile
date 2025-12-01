@@ -6,8 +6,9 @@ pipeline {
     }
 
     triggers {
-        // Run daily at 6 AM New York time
-        cron('TZ=America/New_York H 6 * * *')
+        // Run daily at 6 AM (Server Time)
+        // Note: TZ=America/New_York caused errors. Adjust hour if Server Time != EST.
+        cron('H 6 * * *')
     }
 
     environment {
