@@ -18,8 +18,8 @@ pipeline {
         DB_DATABASE = 'master'
         // DB_USERNAME and DB_PASSWORD should be set in Jenkins Credentials
         // and bound to these environment variables using the 'credentials' helper
-        // DB_USERNAME = credentials('db-username-id')
-        // DB_PASSWORD = credentials('db-password-id')
+        DB_USERNAME = credentials('db-username-id')
+        DB_PASSWORD = credentials('db-password-id')
     }
 
     stages {
@@ -49,7 +49,7 @@ pipeline {
             emailext (
                 subject: "Forms Requirement Report - ${currentBuild.currentResult}",
                 body: "The Forms Requirement Report has been generated successfully. Please find the attached Excel file.",
-                to: "recipient@example.com", // Change this to the target email
+                to: "pavitar.dua@gmail.com", // Change this to the target email
                 attachmentsPattern: "*.xlsx"
             )
         }
@@ -57,7 +57,7 @@ pipeline {
             emailext (
                 subject: "FAILED: Forms Requirement Report",
                 body: "The report generation failed. Please check the Jenkins console logs.",
-                to: "recipient@example.com"
+                to: "pavitar.dua@gmail.com"
             )
         }
     }
