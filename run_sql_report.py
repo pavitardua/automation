@@ -57,16 +57,30 @@ def get_output_filename(source, prefix=None):
             base_name = os.path.splitext(os.path.basename(path))[0]
         else:
             base_name = os.path.splitext(os.path.basename(source))[0]
-            
+    
     # Clean up base_name if it's empty or invalid
     if not base_name:
         base_name = "Report"
-        
+    
     return f"{base_name}_{current_date}.xlsx"
+
+# -----------------------------------------------------------------
+# Helper to inject a report date into the SQL if needed
+# -----------------------------------------------------------------
+def inject_report_date(sql_text, report_date):
+    """Replace a DECLARE @ReportDate line with the supplied date.
+    If the placeholder is not found, the original SQL is returned unchanged.
+    """
+    import re
+    pattern = r"DECLARE\s+@ReportDate\s+DATE\s+=\s+'.*?'"
+    replacement = f"DECLARE @ReportDate DATE = '{report_date}'"
+    new_sql = re.sub(pattern, replacement, sql_text, flags=re.IGNORECASE)
+    return new_sql
 
 def main():
     parser = argparse.ArgumentParser(description='Run a SQL report and export to Excel.')
     parser.add_argument('sql_source', help='Path to local SQL file or URL to SQL file')
+    parser.add_argument('report_date', nargs='?', help='Report date (YYYY-MM-DD) for DailyVolume.sql; optional')
     parser.add_argument('--output-prefix', help='Prefix for the output Excel file (default: SQL filename)')
     
     args = parser.parse_args()
@@ -113,6 +127,9 @@ def main():
     # 2. GET SQL QUERY
     # ---------------------------------------------------------
     sql_query = get_sql_content(args.sql_source)
+    # If a report_date argument was supplied, inject it into the SQL
+    if getattr(args, 'report_date', None):
+        sql_query = inject_report_date(sql_query, args.report_date)
 
     # ---------------------------------------------------------
     # 3. EXECUTE QUERY AND FETCH DATA
