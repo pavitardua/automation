@@ -25,8 +25,18 @@ pipeline {
     stages {
         stage('Setup Python') {
             steps {
-                sh 'python3 -m venv venv'
-                sh '. venv/bin/activate && pip install pandas sqlalchemy pymssql openpyxl requests'
+                script {
+                    // If a cached venv already exists, just reuse it
+                    if (fileExists('venv')) {
+                        echo 'Reusing cached virtual environment'
+                    } else {
+                        echo 'Creating fresh virtual environment and installing deps'
+                        sh 'python3 -m venv venv'
+                        sh '. venv/bin/activate && pip install pandas sqlalchemy pymssql openpyxl requests'
+                        // Cache it for the next build
+                        stash name: 'venv', includes: 'venv/**'
+                    }
+                }
             }
         }
 
