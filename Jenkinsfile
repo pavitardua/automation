@@ -1,8 +1,9 @@
 pipeline {
     agent any
 
+    // Parameter to select any SQL script (default is DailyVolume.sql)
     parameters {
-        string(name: 'SQL_SOURCE', defaultValue: 'FORMS_REQUIREMENT_REPORT.sql', description: 'Path to local SQL file or URL')
+        string(name: 'SQL_SOURCE', defaultValue: 'DailyVolume.sql', description: 'Path or URL to the SQL file to execute')
     }
 
     triggers {
@@ -42,9 +43,20 @@ pipeline {
 
         stage('Run Report Generation') {
             steps {
-                // Ensure the script uses os.getenv() to read credentials
-                // Usage: python3 run_sql_report.py <path_to_sql_file_or_url>
-                sh ". venv/bin/activate && python3 run_sql_report.py '${params.SQL_SOURCE}'"
+                script {
+                    // Determine which SQL file to run – default to DailyVolume.sql unless overridden by an env var
+                    // Use the selected SQL source (default DailyVolume.sql)
+                    def sqlSource = params.SQL_SOURCE
+                    def cmd = ". venv/bin/activate && python3 run_sql_report.py '${sqlSource}'"
+                    // If DailyVolume.sql, compute yesterday's date (UTC) and pass it
+                    if (sqlSource.toLowerCase().contains('dailyvolume.sql')) {
+                        def yesterday = new Date().minus(1).format('yyyy-MM-dd')
+                        cmd += " '${yesterday}'"
+                        echo "DailyVolume report will use date: ${yesterday}"
+                    }
+                    echo "Executing: ${cmd}"
+                    sh cmd
+                }
             }
         }
     }
