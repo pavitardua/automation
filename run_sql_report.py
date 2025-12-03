@@ -41,28 +41,36 @@ def get_sql_content(source):
             print(f"Error reading local file: {e}")
             sys.exit(1)
 
-def get_output_filename(source, prefix=None):
+def get_output_filename(source, prefix=None, report_date=None):
+    """Generate the output Excel filename.
+    If `report_date` is supplied, use it (UTC) for the date part of the filename.
+    Otherwise fall back to the current UTC date.
     """
-    Generates the output filename based on the source or provided prefix.
-    """
-    current_date = datetime.now().strftime('%m_%d_%Y')
-    
+    # Determine the date string (MM_DD_YYYY) – use report_date if given, else UTC now
+    if report_date:
+        # Expect YYYY-MM-DD format; convert to MM_DD_YYYY
+        try:
+            dt = datetime.strptime(report_date, "%Y-%m-%d")
+        except Exception:
+            # If parsing fails, fallback to UTC now
+            dt = datetime.utcnow()
+    else:
+        dt = datetime.utcnow()
+    date_str = dt.strftime('%m_%d_%Y')
+
+    # Determine base name (prefix or derived from source)
     if prefix:
         base_name = prefix
     else:
-        # Extract filename from URL or path
         if source.startswith('http'):
             parsed = urlparse(source)
             path = parsed.path
             base_name = os.path.splitext(os.path.basename(path))[0]
         else:
             base_name = os.path.splitext(os.path.basename(source))[0]
-    
-    # Clean up base_name if it's empty or invalid
     if not base_name:
         base_name = "Report"
-    
-    return f"{base_name}_{current_date}.xlsx"
+    return f"{base_name}_{date_str}.xlsx"
 
 # -----------------------------------------------------------------
 # Helper to inject a report date into the SQL if needed
@@ -148,7 +156,7 @@ def main():
     # ---------------------------------------------------------
     # 4. EXPORT TO EXCEL
     # ---------------------------------------------------------
-    output_filename = get_output_filename(args.sql_source, args.output_prefix)
+    output_filename = get_output_filename(args.sql_source, args.output_prefix, args.report_date)
     print(f"Exporting data to {output_filename}...")
     
     try:
