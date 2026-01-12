@@ -6,7 +6,19 @@
 -- Note: LEFT JOIN on Account table to include registrations without associated accounts
 --------------------------------------------------------------------------------------------------------------------
 --SELECT DISTINCT ProgramName,SeasonShortName,OrgName,COUNT(*) FROM (
+
+WITH FormsRecordRowNumberAllocator AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY memberId, seasonId 
+               ORDER BY lastModifiedDate  DESC, id DESC
+           ) AS rn
+    FROM AlphaProgramReg.dbo.Registration
+)
+SELECT *
+FROM (
 SELECT 
+	
     -- Timestamp Information (Eastern Time)
     CAST(r.lastModifiedDate AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time' AS DATETIME) AS 'LastModifiedDateEastern',
     
@@ -68,12 +80,30 @@ SELECT
     r.originallySubmittedBgcFormId,
     r.orgStandardBgcProgramRevisionVersion,
     r.orgStandardProgramRevisionVersion,
+
     
     -- TRAINING MODULE CONFIGURATION
     prog.includeTrainingModule AS 'TRAIN mod',
-    prog.automatedTrainingReminders AS 'TRAIN reminders'
+    prog.automatedTrainingReminders AS 'TRAIN reminders',
+    
+    -- FRNA
+    rn,
+    (CASE 
+        WHEN rn = 1 AND r.active = 1 THEN 'LATEST_ACTIVE'
+        WHEN rn = 1 AND r.active = 0 THEN 'LATEST_INACTIVE'
+        WHEN rn > 1 AND r.active = 1 THEN 'OLD_ACTIVE_ANOMALY'
+        ELSE 'HISTORICAL'
+    END) AS 'regStatusDupIndicator',
+    
+    (CASE 
+        WHEN rn = 1 AND r.bgcActive = 1 THEN 'LATEST_ACTIVE'
+        WHEN rn = 1 AND r.bgcActive = 0 THEN 'LATEST_INACTIVE'
+        WHEN rn > 1 AND r.bgcActive = 1 THEN 'OLD_ACTIVE_ANOMALY'
+        ELSE 'HISTORICAL'
+    END) AS 'bgcStatusDupIndicator'
 
 FROM AlphaProgramReg.dbo.Registration r 
+join FormsRecordRowNumberAllocator FRNA ON r.id=FRNA.id
 
 -- Program and Season Relationships
 JOIN AlphaProgramReg.dbo.Program prog ON prog.id = r.programId
@@ -117,4 +147,8 @@ WHERE s.seasonId < 10000
 --AND r.programId=1825 AND r.memberId=17547 -- BRONZE TEST SHOULD BE CREATED WITH REG REQUIRED< BGC STATUS SHOULD NOT BE NULL and BGC ACTIVE SHOULD BE FALSE CL4S SHOULD WORK 
 --) AS C GROUP BY ProgramName,SeasonShortName,OrgName
 -- Order by most recently modified registrations first
-ORDER BY r.lastModifiedDate DESC;
+--AND r.memberId=17191
+--AND rn>2 --17191,13893
+) AS subquery
+--WHERE regStatusDupIndicator='OLD_ACTIVE_ANOMALY' OR bgcStatusDupIndicator='OLD_ACTIVE_ANOMALY'
+ORDER BY LastModifiedDateEastern DESC;
