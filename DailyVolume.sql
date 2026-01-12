@@ -1,4 +1,4 @@
-
+-- CHANGED QUERY TO ALL ACTIVE SEASON ACROSS COACHSPAN LOOKING AT PAST ONE WEEK
 
 --OrgName	OrgStatus	ProgramName	SeasonShortName	Activation Date	FPD	End	Active Season?	
 --Associations	Change in last Day	% Change in last Day	
@@ -8,12 +8,14 @@
 
 
 -- Parameter for the report date (in Eastern Time)
-DECLARE @ReportDate DATE = '2025-12-02';  -- Change this date as needed
+DECLARE @ReportDate DATE = '2026-01-11';  -- Change this date as needed
 
 -- Calculate Eastern Time boundaries for the specified date
 DECLARE @DayStartET DATETIME, @DayEndET DATETIME;
-SET @DayStartET = CAST(@ReportDate AS DATETIME);
-SET @DayEndET = DATEADD(SECOND, -1, DATEADD(DAY, 1, @DayStartET));
+SET @DayStartET = DATEADD(SECOND, -1, DATEADD(DAY, -7, CAST(@ReportDate AS DATETIME)));
+SET @DayEndET = CAST(@ReportDate AS DATETIME);
+
+
 
 -- Convert Eastern Time boundaries to UTC for database comparison
 -- (Assuming your database stores timestamps in UTC)
@@ -21,7 +23,15 @@ DECLARE @DayStartUTC DATETIME, @DayEndUTC DATETIME;
 SET @DayStartUTC = @DayStartET AT TIME ZONE 'Eastern Standard Time' AT TIME ZONE 'UTC';
 SET @DayEndUTC = @DayEndET AT TIME ZONE 'Eastern Standard Time' AT TIME ZONE 'UTC';
 
-
+WITH FirstPersonObjectRole AS (
+			    SELECT *,
+			           ROW_NUMBER() OVER (
+			               PARTITION BY memberId 
+			               ORDER BY PersonObjectRoleId
+			           ) AS rn
+			    FROM AlphaContact.dbo.PersonObjectRole
+			    WHERE deletedFlag=0
+			)
 SELECT 
     'Report for (UTC): ' + 
     FORMAT(@DayStartUTC, 'MM/dd/yyyy HH:mm:ss') + ' to ' + 
@@ -61,17 +71,19 @@ od.FirstName OD_First_Name ,od.LastName OD_Last_Name, OD_Email_Address,OD_contac
 ,training_completions.percent_total_training_completions_last_day AS percent_new_training_completions
 
 -- Email activities on report date
-,ISNULL(EMAIL_LOGS.TRAINING_REMINDERS_SENT, 0) AS training_reminders_sent_today
+
+ ,ISNULL(EMAIL_LOGS.TRAINING_REMINDERS_SENT, 0) AS training_reminders_sent_today
 ,ISNULL(EMAIL_LOGS.REG_REMINDERS_SENT, 0) AS reg_reminders_sent_today
 ,ISNULL(EMAIL_LOGS.BGC_REMINDERS_SENT, 0) AS bgc_reminders_sent_today
 ,ISNULL(EMAIL_LOGS.VERIFICATION_CODES_SENT, 0) AS verification_codes_sent_today
 ,ISNULL(EMAIL_LOGS.CONTENT_PACKAGES_SENT, 0) AS content_packages_sent_today
+ 
 
 FROM AlphaProgramReg.dbo.Program prog
-JOIN AlphaDesign.dbo.Season s ON s.programId=prog.id AND YEAR(s.DefaultStartDate)=2025 AND MONTH(s.DefaultStartDate) IN (9,10,11)
+JOIN AlphaDesign.dbo.Season s ON s.programId=prog.id 
 JOIN AlphaProgramReg.dbo.ProgramSubscriptionLOS psl on psl.programId =prog.id AND psl.isActive =1
 JOIN AlphaProgramReg.dbo.LevelOfService los on psl.levelOfServiceId =los.id 
-JOIN AlphaProgramReg.dbo.League l ON prog.leagueId = l.id 
+LEFT JOIN AlphaProgramReg.dbo.League l ON prog.leagueId = l.id 
 JOIN AlphaContact.dbo.Organization org ON prog.orgId = org.OrgId 
 
 -- Organization Director contact info
@@ -139,7 +151,7 @@ LEFT JOIN (
       --AND reg.submittedDate >= @DayStartUTC 
       AND reg.submittedDate <= @DayEndUTC  -- Only count up to report date
     GROUP BY reg.seasonId, reg.programId
-) reg_submissions ON reg_submissions.seasonId = s.SeasonId 
+) reg_submissions ON reg_submissions.seasonId = s.SeasonId  
 
 -- Registration Outstanding (as of report date)
 -- Only count registrations created on or before report date that are still outstanding
@@ -233,151 +245,41 @@ LEFT JOIN (
 ) training_completions ON training_completions.seasonId = s.SeasonId 
 
 -- Email Activities on report date
-LEFT JOIN (
-    SELECT o.OrgId, 
+
+ LEFT JOIN (
+ 	
+    SELECT o.OrgId, s2.seasonId,
            SUM(CASE WHEN el.emailType = 'TRAINING_REMINDER' THEN 1 ELSE 0 END) AS TRAINING_REMINDERS_SENT,
            SUM(CASE WHEN el.emailType = 'REG_REMINDER' THEN 1 ELSE 0 END) AS REG_REMINDERS_SENT,
            SUM(CASE WHEN el.emailType = 'BGC_REMINDER' THEN 1 ELSE 0 END) AS BGC_REMINDERS_SENT,
            SUM(CASE WHEN el.emailType = 'VERIFICATION_CODE' THEN 1 ELSE 0 END) AS VERIFICATION_CODES_SENT,
            SUM(CASE WHEN el.emailType = 'CONTENT_PACKAGES' THEN 1 ELSE 0 END) AS CONTENT_PACKAGES_SENT
-           
+     
     FROM AlphaContact.dbo.EmailLog el
-    LEFT JOIN AlphaContact.dbo.Account a ON a.LoginUserName = el.toEmail 
-    INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId = a.AccountId 
+    INNER JOIN AlphaContact.dbo.ContactMethod CM1 ON CM1.ContactValue =el.toEmail AND (CM1.ContactTypeId = 'PEML' OR CM1.ContactTypeId = 'ATEML')
+	--INNER JOIN AlphaContact.dbo.Account a ON a.LoginUserName = el.toEmail 
+    INNER JOIN AlphaContact.dbo.OrgMember om ON om.PersonId  = CM1.PersonId  
+    INNER JOIN FirstPersonObjectRole AS POR ON POR.memberId=om.OrgMemberId AND POR.RoleId IN ('HC','AC')
+    INNER JOIN AlphaDesign.dbo.Division d2 ON d2.divisionId= por.MappedObjectId
+    INNER JOIN AlphaDesign.dbo.Season s2 ON  d2.seasonId=s2.seasonId
+    
     INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId = om.OrgId 
+    
+    
+    
+    
     WHERE el.emailType IN ('TRAINING_REMINDER', 'REG_REMINDER', 'BGC_REMINDER', 'VERIFICATION_CODE','CONTENT_PACKAGES')
       AND el.dateCreated >= @DayStartUTC
       AND el.dateCreated <= @DayEndUTC  -- Only emails sent on report date
-    GROUP BY o.OrgId
-) AS EMAIL_LOGS ON EMAIL_LOGS.OrgId = org.OrgId
+      AND CM1.ContactValue =el.toEmail 
+    GROUP BY o.OrgId,s2.seasonId
+) AS EMAIL_LOGS ON EMAIL_LOGS.OrgId = org.OrgId AND EMAIL_LOGS.seasonId =  s.seasonId
 
-WHERE prog.leagueId IS NOT NULL 
-  AND prog.leagueId IN (1,2) 
-ORDER BY orgname ,associations.total_associations_last_day DESC,
-         reg_submissions.total_reg_submissions_last_day DESC,
-         training_completions.total_training_completions_last_day DESC,
-         bgc_submissions.total_bgc_submissions_last_day DESC;
-/*
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- 
--- Parameter for the report date (in Eastern Time)
-DECLARE @ReportDate DATE = '2025-12-02';  -- Change this date as needed
-
--- Calculate Eastern Time boundaries for the specified date
-DECLARE @DayStartET DATETIME, @DayEndET DATETIME;
-SET @DayStartET = CAST(@ReportDate AS DATETIME);
-SET @DayEndET = DATEADD(SECOND, -1, DATEADD(DAY, 1, @DayStartET));
-
--- Convert Eastern Time boundaries to UTC for database comparison
--- (Assuming your database stores timestamps in UTC)
-DECLARE @DayStartUTC DATETIME, @DayEndUTC DATETIME;
-SET @DayStartUTC = @DayStartET AT TIME ZONE 'Eastern Standard Time' AT TIME ZONE 'UTC';
-SET @DayEndUTC = @DayEndET AT TIME ZONE 'Eastern Standard Time' AT TIME ZONE 'UTC';
 
  
 
-      
-      
-      SELECT *
-    FROM AlphaTraining.dbo.CoachClass CC 
-    JOIN AlphaTraining.dbo.SeasonAssignment SA ON SA.SeasonAssignId = CC.SeasonAssignId  
-    WHERE CC.CourseId IN (52,53,54,55) 
-      AND CC.OverallStatusId LIKE 'C'
-      AND SA.seasonId=1159
-      AND CC.OverallDateCompleted >= @DayStartUTC
-                        AND CC.OverallDateCompleted <= @DayEndUTC   -- Only count up to report date
-      
-    GROUP BY SA.seasonId
-      
-    SELECT el.*
-    FROM AlphaContact.dbo.EmailLog el
-     LEFT JOIN AlphaContact.dbo.Account a ON a.LoginUserName = el.toEmail 
-    INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId = a.AccountId 
-    INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId = om.OrgId 
-    WHERE el.emailType IN ('CONTENT_PACKAGES')
-      AND el.dateCreated >= @DayStartUTC
-      AND el.dateCreated <= @DayEndUTC  -- Only emails sent on report date
-      AND o.orgId=315   
-      
-
-SELECT  * FROM AlphaContact.dbo.Account a 
-WHERE a.verifiedOn IS NULL
-AND a.DateCreated>'10/01/2025'
-ORDER BY DateCreated DESC;
-Select  el.*, o.OrgId  
-FROM AlphaContact.dbo.EmailLog el
-INNER JOIN AlphaContact.dbo.Account a ON a.LoginUserName =el.toEmail 
-INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId =a.AccountId 
-INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId =om.OrgId 
-INNER JOIN AlphaContact.dbo.Person p ON p.PersonId =om.PersonId 
-WHERE el.toemail='maneehl@yahoo.com';
-
-
-
-
-
-Select  COUNT(*), el.emailType, o.OrgId  
-FROM AlphaContact.dbo.EmailLog el
-INNER JOIN AlphaContact.dbo.Account a ON a.LoginUserName =el.toEmail 
-INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId =a.AccountId 
-INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId =om.OrgId 
-INNER JOIN AlphaContact.dbo.Person p ON p.PersonId =om.PersonId 
-WHERE el.emailType ='REG_REMINDER' AND  el.dateCreated >= DATEADD(DAY, -1, GETDATE())
-GROUP BY o.OrgId, emailType;
-
-Select  COUNT(*), el.emailType, o.OrgId  
-FROM AlphaContact.dbo.EmailLog el
-INNER JOIN AlphaContact.dbo.Account a ON a.LoginUserName =el.toEmail 
-INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId =a.AccountId 
-INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId =om.OrgId 
-INNER JOIN AlphaContact.dbo.Person p ON p.PersonId =om.PersonId 
-WHERE el.emailType ='BGC_REMINDER' AND  el.dateCreated >= DATEADD(DAY, -1, GETDATE())
-GROUP BY o.OrgId, emailType;
-
-
-SELECT COUNT(*) 
-FROM AlphaProgramReg.dbo.Program prog 
-JOIN AlphaDesign.dbo.Season s ON s.programId=prog.id AND YEAR(s.DefaultStartDate)=2025 AND MONTH(s.DefaultStartDate) IN (9,10,11)
-JOIN AlphaTraining.dbo.SeasonAssignment SA ON SA.SeasonId  =S.SeasonId  
-JOIN  AlphaTraining.dbo.CoachClass CC ON SA.SeasonAssignId =CC.SeasonAssignId 
-JOIN AlphaProgramReg.dbo.ProgramSubscriptionLOS psl on psl.programId =prog.id AND psl.isActive =1
-JOIN AlphaProgramReg.dbo.LevelOfService los on psl.levelOfServiceId =los.id 
-JOIN AlphaProgramReg.dbo.League l ON prog.leagueId = l.id 
-JOIN AlphaContact.dbo.Organization org ON prog.orgId = org.OrgId 
-WHERE CC.CourseId IN (52,53,54,55) AND CC.OverallStatusId LIKE 'C%'  
-AND prog.leagueId IS NOT NULL 
-AND prog.leagueId IN (1,2) 
-
-
-Select   DAY(GETDATE()) ,el.*, o.OrgId  
-FROM AlphaContact.dbo.EmailLog el
-INNER JOIN AlphaContact.dbo.Account a ON a.LoginUserName =el.toEmail 
-INNER JOIN AlphaContact.dbo.OrgMember om ON om.AccountId =a.AccountId 
-INNER JOIN AlphaContact.dbo.Organization o ON o.OrgId =om.OrgId 
-INNER JOIN AlphaContact.dbo.Person p ON p.PersonId =om.PersonId 
-WHERE el.emailType ='TRAINING_REMINDER' AND el.dateCreated >= DATEADD(DAY, -1, GETDATE()) 
-
-
-
-TRAINING_REMINDER
-VERIFICATION_CODE
-BGC_REMINDER
-REG_REMINDER
-
-*
-*
-*
-**/
-
-
-
-
-
-
-
+WHERE 1=1 --AND  S.seasonid=1158 
+ AND s.DefaultEndDate>=GETDATE()
+ --AND prog.leagueId IS NOT NULL 
+ --AND prog.leagueId IN (1,2) 
+ORDER BY orgname,reg_outstanding.total_reg_outstanding DESC; 
